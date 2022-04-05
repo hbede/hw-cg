@@ -1,0 +1,6 @@
+/src/freeglut/
+/src/glew/
+/cmake/
+/cmake-build-debug/
+/include/
+/.idea/
