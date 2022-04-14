@@ -1,25 +1,7 @@
-//=============================================================================================
-// Mintaprogram: Zold haromszog. Ervenyes 2019. osztol.
-//
-// A beadott program csak ebben a fajlban lehet, a fajl 1 byte-os ASCII karaktereket tartalmazhat, BOM kihuzando.
-// Tilos:
-// - mast "beincludolni", illetve mas konyvtarat hasznalni
-// - faljmuveleteket vegezni a printf-et kiveve
-// - Mashonnan atvett programresszleteket forrasmegjeloles nelkul felhasznalni es
-// - felesleges programsorokat a beadott programban hagyni!!!!!!!
-// - felesleges kommenteket a beadott programba irni a forrasmegjelolest kommentjeit kiveve
-// ---------------------------------------------------------------------------------------------
-// A feladatot ANSI C++ nyelvu forditoprogrammal ellenorizzuk, a Visual Studio-hoz kepesti elteresekrol
-// es a leggyakoribb hibakrol (pl. ideiglenes objektumot nem lehet referencia tipusnak ertekul adni)
-// a hazibeado portal ad egy osszefoglalot.
-// ---------------------------------------------------------------------------------------------
-// A feladatmegoldasokban csak olyan OpenGL fuggvenyek hasznalhatok, amelyek az oran a feladatkiadasig elhangzottak
-// A keretben nem szereplo GLUT fuggvenyek tiltottak.
-//
 // NYILATKOZAT
 // ---------------------------------------------------------------------------------------------
-// Nev    :
-// Neptun :
+// Nev    : Horvath Benedek
+// Neptun : D86EP7
 // ---------------------------------------------------------------------------------------------
 // ezennel kijelentem, hogy a feladatot magam keszitettem, es ha barmilyen segitseget igenybe vettem vagy
 // mas szellemi termeket felhasznaltam, akkor a forrast es az atvett reszt kommentekben egyertelmuen jeloltem.
@@ -42,7 +24,7 @@ const char * const vertexSource = R"(
 	layout(location = 0) in vec2 vp;	// Varying input: vp = vertex position is expected in attrib array 0
 
 	void main() {
-		gl_Position = MVP*vec4(vp.x, vp.y, 0, 1);		// transform vp from modeling space to normalized device space
+		gl_Position = vec4(vp.x, vp.y, 0, 1)*MVP;		// transform vp from modeling space to normalized device space
 	}
 )";
 
@@ -59,163 +41,372 @@ const char * const fragmentSource = R"(
 	}
 )";
 
-GPUProgram gpuProgram; // vertex and fragment shaders
-unsigned int vao, vbo;	   // virtual world on the GPU
+GPUProgram gpuProgram;
 const int nv = 100;
 
 float random() { return (float)rand() / RAND_MAX; }
 
-class Circle {
-    vec2 position;
-    float radius;
-    vec3 color;
-    vec2 perimeterPoints[nv];
+int getIndex(std::vector<vec2> &v, vec2 &item) {
+    for (int i = 0; i < v.size(); ++i) {
+        if (item.x == v[i].x && item.y == v[i].y) {
+            return i;
+        }
+    }
+}
+
+class Object {
 public:
-    Circle(vec2 pos, float r, vec3 col) {
-        position = pos;
-        radius = r;
-        color = col;
-        for (int i = 0; i < nv; i++) {
-            float fi = i * 2  * M_PI / nv;
-            perimeterPoints[i] = vec2(cosf(fi)*radius, sinf(fi)*radius);
+    unsigned int vao, vbo;
+    std::vector<vec2> vtx;
+    float sx = 1;
+    float sy = 1;
+    vec2 wTranslate = vec2(0,0);
+    float phi = 0;
+    Object() {
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
+        glGenBuffers(1, &vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+    }
+
+    mat4 M() {
+        mat4 Mscale(sx, 0, 0, 0,
+                    0, sy, 0, 0,
+                    0, 0, 0, 0,
+                    0, 0, 0, 1);
+
+        mat4 Mrotate(cosf(phi), sinf(phi), 0, 0,
+                     -sinf(phi), cosf(phi), 0, 0,
+                     0, 0, 1, 0,
+                     0, 0, 0, 1);
+
+        mat4 Mtranslate(1, 0, 0, 0,
+                        0, 1, 0, 0,
+                        0, 0, 0, 0,
+                        wTranslate.x, wTranslate.y, 0, 1);
+
+        return Mscale * Mrotate * Mtranslate;
+    }
+
+    void Draw(int type, vec3 color) {
+        int count = vtx.size();
+        if (count > 0) {
+            updateGPU();
+            gpuProgram.setUniform(color, "color");
+            gpuProgram.setUniform(M(), "MVP");
+            glBindVertexArray(vao);
+            glDrawArrays(type, 0, count);
         }
     }
 
-    vec2* getPerimeterPoints() {
-        return perimeterPoints;
+    void updateGPU() {
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, vtx.size() * sizeof(vec2),
+                     &vtx[0], GL_DYNAMIC_DRAW);
     }
-    void draw() {
 
+    void rotate(float t) {
+        phi = t;
+    }
 
-        gpuProgram.setUniform(color, "color");
-        glBufferData(GL_ARRAY_BUFFER, 	// Copy to GPU target
-                     sizeof(vec2)*nv,  // # bytes
-                     perimeterPoints,	      	// address
-                     GL_STATIC_DRAW);	// we do not change later
-
-        gpuProgram.Use();
-
-        int colorLocation = glGetUniformLocation(gpuProgram.getId(), "color");
-
-        int mvpLocation = glGetUniformLocation(gpuProgram.getId(), "MVP");
-
-        float matrix[] = {
-                1,0,0,0,
-                0, 1, 0, 0,
-                0,0,1,0,
-                position.x,position.y, 0,1
-        };
-        glUniformMatrix4fv(mvpLocation, 1, GL_FALSE, matrix);
-        glDrawArrays(GL_TRIANGLE_FAN, 0, nv);
+    void translate(vec2 m) {
+        wTranslate.x = m.x;
+        wTranslate.y = m.y;
     }
 };
 
-class Atom : Circle {
-    float charge;
-    float mass;
+class Atom : Object {
+public:
+    float chargePowerMinus19C = 1.602f;
+    float massPowerMinus24Kg = 1.674f;
+    vec2 position;
+    float radius;
+    vec3 color;
+
+    Atom(vec2 pos, int chargeMultiplier) {
+        position = pos;
+        chargePowerMinus19C *= chargeMultiplier;
+        massPowerMinus24Kg *= ((rand() % 100) + 100);
+        radius = massPowerMinus24Kg / 3000;
+        if(chargePowerMinus19C < 0)
+            color = vec3(0, 0, chargePowerMinus19C*(-1) / 1000);
+        else
+            color = vec3(chargePowerMinus19C / 1000, 0, 0);
+
+
+        for (int i = 0; i < nv; i++) {
+            float fi = i * 2  * M_PI / nv;
+            vtx.push_back(vec2(cosf(fi)*radius, sinf(fi)*radius) + position);
+        }
+    }
+    void drawAtom() {
+        Draw(GL_TRIANGLE_FAN, this->color);
+    }
+
+    float getMass() const {
+        return massPowerMinus24Kg;
+    }
+
+    float getX() const {
+        return position.x;
+    }
+
+    void setVertices(vec2 vec) {
+        for (auto &v : vtx) {
+            v.x -= vec.x;
+            v.y -= vec.y;
+        }
+    }
+
+    float getY() const {
+        return position.y;
+    }
+
+    void rotateAtom(float t) {
+        rotate(t);
+    }
+
+    void translateAtom(vec2 v) {
+        translate(v);
+    }
 };
 
-class Molecule {
-    std::vector<Circle> atoms;
-    // lines
-    vec2 origin;
+class Bond : Object {
+public:
+    vec2 pointFrom;
+    vec2 pointTo;
+    vec2 normalized;
+    float distanceUnit;
+    float length;
+
+    Bond(vec2 pFrom, vec2 pTo) {
+        pointFrom = pFrom;
+        pointTo = pTo;
+        length = sqrt((pointFrom.x-pointTo.x)*(pointFrom.x-pointTo.x)+(pointFrom.y-pointTo.y)*(pointFrom.y-pointTo.y));
+        distanceUnit = length / nv;
+        normalized = (pointTo - pointFrom) / length;
+        for (int i = 0; i < nv; i++) {
+            vtx.push_back(pointFrom + (normalized * distanceUnit * i));
+        }
+    }
+
+    void drawBond() {
+        Draw(GL_LINE_STRIP, vec3(1,1,1));
+    }
+
+    void setVertices(vec2 vec) {
+        for (auto &v : vtx) {
+            v.x -= vec.x;
+            v.y -= vec.y;
+        }
+    }
+
+    void rotateBond(float d) {
+        phi = d;
+    }
+
+    void translateBond(vec2 v) {
+        translate(v);
+    }
 };
 
-std::vector<Circle> circles;
+class Molecule : Object {
+public:
+    std::vector<Atom> atoms;
+    std::vector<Bond> bonds;
 
-// Initialization, create an OpenGL context
+    vec2 genRange;
+
+    vec2 centerOfMass;
+
+    Molecule(vec2 range) {
+        genRange = range;
+    }
+
+    void drawMolecule(vec3 color) {
+        for (auto &b : bonds) {
+            b.drawBond();
+        }
+        for (auto &a : atoms) {
+            a.drawAtom();
+        }
+    }
+
+    void addAtoms() {
+        std::vector<int> charges;
+        int sum = 0;
+        for (int i = 0; i < vtx.size() - 1; i++) {
+            charges.push_back((rand() % 2000) - 1000);
+            sum+=charges[i];
+        }
+        charges.push_back(sum * (-1));
+        for (int i = 0; i < vtx.size(); i++) {
+            atoms.push_back(Atom(vtx[i],charges[i]));
+        }
+    }
+
+    void addBonds() {
+
+        std::vector<vec2> tree;
+        std::vector<vec2> freeAtoms = std::vector<vec2>(vtx);
+        vec2 start = vec2(freeAtoms[0]);
+
+        tree.push_back(start);
+        freeAtoms.erase(freeAtoms.begin() + getIndex(freeAtoms, start));
+
+        while(tree.size() < vtx.size()) {
+            float minDistance = 999;
+            float distance;
+            vec2 minPointTo;
+            vec2 minPointFrom;
+            for (auto &bound : tree) {
+                for (auto &free : freeAtoms) {
+                    distance = length(free - bound);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        minPointTo = vec2(free);
+                        minPointFrom = vec2(bound);
+                    }
+                }
+            }
+            tree.push_back(minPointTo);
+            bonds.push_back(Bond(minPointFrom, minPointTo));
+            freeAtoms.erase(freeAtoms.begin() + getIndex(freeAtoms, minPointTo));
+        }
+        printf("%d", bonds.size());
+    }
+
+    void generateMolecule() {
+        auto atomCount = rand() % 6 + 2;
+        for (int i = 0; i < atomCount; i++) {
+            vtx.push_back(vec2(
+                    (random()*fabs(genRange.x - genRange.y)) + genRange.x, random()*2-1
+                    ));
+        }
+        addAtoms();
+        addBonds();
+        calculateCenterOfMass();
+
+        normalizeMolecule();
+    }
+
+    void rotateMolecule(float t) {
+        rotate(t);
+        for (auto &a : atoms) {
+            a.rotateAtom(t);
+        }
+        for (auto &b : bonds) {
+            b.rotateBond(t);
+        }
+    }
+
+    void translateMolecule(vec2 v) {
+        translate(v);
+        for (auto &a : atoms) {
+            a.translateAtom(v);
+        }
+        for (auto &b : bonds) {
+            b.translateBond(v);
+        }
+    }
+
+    void calculateCenterOfMass() {
+        float sumImpX = 0;
+        float sumImpY = 0;
+        float sumMass = 0;
+        for (const auto &a : atoms) {
+            sumImpX += a.getMass() * a.getX();
+            sumImpY += a.getMass() * a.getY();
+            sumMass += a.getMass();
+        }
+        centerOfMass.x = sumImpX / sumMass;
+        centerOfMass.y = sumImpY / sumMass;
+    }
+
+    void normalizeMolecule() {
+        for (auto &v : vtx) {
+            v.x -= centerOfMass.x;
+            v.y -= centerOfMass.y;
+        }
+        for (auto &a : atoms) {
+            a.setVertices(centerOfMass);
+        }
+
+        for (auto &b : bonds) {
+            b.setVertices(centerOfMass);
+        }
+    }
+};
+
+std::vector<Molecule> molecules;
+
 void onInitialization() {
     glViewport(0, 0, windowWidth, windowHeight);
+    glLineWidth(2);
+    glPointSize(10);
 
-    // create program for the GPU
+    srand(time(nullptr));
+
     gpuProgram.create(vertexSource, fragmentSource, "outColor");
 
-    glGenVertexArrays(1, &vao);	// get 1 vao id
-    glBindVertexArray(vao);		// make it active
+    molecules.push_back(Molecule(vec2(-1.0f, 0.0f)));
+    molecules.push_back(Molecule(vec2(0.0f, 1.0f)));
 
-    glGenBuffers(1, &vbo);	// Generate 1 buffer
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    for (auto & m : molecules) {
+        m.generateMolecule();
+    }
+}
 
-    glEnableVertexAttribArray(0);  // AttribArray 0
-    glVertexAttribPointer(0,       // vbo -> AttribArray 0
-                          2, GL_FLOAT, GL_FALSE, // two floats/attrib, not fixed-point
-                          0, NULL); 		     // stride, offset: tightly packed
+bool notFirst = false;
 
+void onDisplay() {
+    glClearColor(0.3f, 0.3f, 0.3f, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
 
-    // Geometry with 24 bytes (6 floats or 3 x 2 coordinates)
-    float vertices[] = { -0.8f, -0.8f, -0.6f, 1.0f, 0.8f, -0.2f };
-//    circles.push_back(Circle(vec2(0.5f,0), 0.1f, vec3(1, 0, 0)));
-//    circles.push_back(Circle(vec2(0.9f,0.3f), 0.4f, vec3(0, 1, 0)));
-//    circles.push_back(Circle(vec2(-0.5f,-0.4f), 0.7f, vec3(0, 0, 1)));
-
-    for (int i = 0; i < 1000; i++) {
-        circles.push_back(Circle(vec2((random()*2)-1,(random()*2)-1), 1.0f*random()/20, vec3(random(), random(), random())));
+    if(notFirst) {
+        for (int i = 0; i < molecules.size(); i++) {
+            molecules[i].drawMolecule(vec3(1, 1, 1));
+        }
     }
 
+    glutSwapBuffers();
 }
 
-// Window has become invalid: Redraw
-void onDisplay() {
-    glClearColor(0, 0, 0, 0);     // background color
-    glClear(GL_COLOR_BUFFER_BIT); // clear frame buffer
-
-    for (auto c : circles){c.draw();}
-
-//    // Set color to (0, 1, 0) = green
-//    int location = glGetUniformLocation(gpuProgram.getId(), "color");
-//    glUniform3f(location, 0.0f, 1.0f, 0.0f); // 3 floats
-//
-//    float MVPtransf[4][4] = { 1, 0, 0, 0,    // MVP matrix,
-//                              0, 1, 0, 0,    // row-major!
-//                              0, 0, 1, 0,
-//                              0, 0, 0, 1 };
-//
-//    location = glGetUniformLocation(gpuProgram.getId(), "MVP");	// Get the GPU location of uniform variable MVP
-//    glUniformMatrix4fv(location, 1, GL_TRUE, &MVPtransf[0][0]);	// Load a 4x4 row-major float matrix to the specified location
-//
-//    glBindVertexArray(vao);  // Draw call
-//    glDrawArrays(GL_TRIANGLES, 0 /*startIdx*/, 3 /*# Elements*/);
-
-    glutSwapBuffers(); // exchange buffers for double buffering
-}
-
-// Key of ASCII code pressed
 void onKeyboard(unsigned char key, int pX, int pY) {
-    if (key == 'd') glutPostRedisplay();         // if d, invalidate display, i.e. redraw
+    if (key == 32) {
+        notFirst = true;
+
+        for (auto &m : molecules) {
+            m = (Molecule(vec2(-1.0f, 0.0f)));
+            m.generateMolecule();
+        }
+
+        glutPostRedisplay();
+    }
 }
 
-// Key of ASCII code released
+
 void onKeyboardUp(unsigned char key, int pX, int pY) {
 }
 
-// Move mouse with key pressed
-void onMouseMotion(int pX, int pY) {	// pX, pY are the pixel coordinates of the cursor in the coordinate system of the operation system
-    // Convert to normalized device space
-    float cX = 2.0f * pX / windowWidth - 1;	// flip y axis
-    float cY = 1.0f - 2.0f * pY / windowHeight;
-    printf("Mouse moved to (%3.2f, %3.2f)\n", cX, cY);
+
+void onMouseMotion(int pX, int pY) {
 }
 
 // Mouse click event
-void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel coordinates of the cursor in the coordinate system of the operation system
-    // Convert to normalized device space
-    float cX = 2.0f * pX / windowWidth - 1;	// flip y axis
-    float cY = 1.0f - 2.0f * pY / windowHeight;
-
-    char * buttonStat;
-    switch (state) {
-        case GLUT_DOWN: buttonStat = "pressed"; break;
-        case GLUT_UP:   buttonStat = "released"; break;
-    }
-
-    switch (button) {
-        case GLUT_LEFT_BUTTON:   printf("Left button %s at (%3.2f, %3.2f)\n", buttonStat, cX, cY);   break;
-        case GLUT_MIDDLE_BUTTON: printf("Middle button %s at (%3.2f, %3.2f)\n", buttonStat, cX, cY); break;
-        case GLUT_RIGHT_BUTTON:  printf("Right button %s at (%3.2f, %3.2f)\n", buttonStat, cX, cY);  break;
-    }
+void onMouse(int button, int state, int pX, int pY) {
 }
 
-// Idle event indicating that some time elapsed: do animation here
 void onIdle() {
-    long time = glutGet(GLUT_ELAPSED_TIME); // elapsed time since the start of the program
+    long time = glutGet(GLUT_ELAPSED_TIME);
+    float sec = time / 1000.0f;
+    for (auto &m : molecules) {
+        m.rotateMolecule(sec);
+    }
+    molecules[0].translateMolecule(vec2(0.5f, 0.5f));
+    molecules[1].translateMolecule(vec2(-0.5f, -0.5f));
+    glutPostRedisplay();
 }
