@@ -44,7 +44,7 @@ const char * const fragmentSource = R"(
 GPUProgram gpuProgram;
 const int nv = 100;
 
-float random() { return (float)rand() / RAND_MAX; }
+float randomFloat() { return (float)rand() / RAND_MAX; }
 
 int getIndex(std::vector<vec2> &v, vec2 &item) {
     for (int i = 0; i < v.size(); ++i) {
@@ -115,6 +115,7 @@ public:
     void translate(vec2 m) {
         wTranslate.x = m.x;
         wTranslate.y = m.y;
+        // TODO translate to +=
     }
 };
 
@@ -130,7 +131,7 @@ public:
         position = pos;
         chargePowerMinus19C *= chargeMultiplier;
         massPowerMinus24Kg *= ((rand() % 100) + 100);
-        radius = massPowerMinus24Kg / 3000;
+        radius = massPowerMinus24Kg / 5000;
         if(chargePowerMinus19C < 0)
             color = vec3(0, 0, chargePowerMinus19C*(-1) / 1000);
         else
@@ -276,15 +277,14 @@ public:
             bonds.push_back(Bond(minPointFrom, minPointTo));
             freeAtoms.erase(freeAtoms.begin() + getIndex(freeAtoms, minPointTo));
         }
-        printf("%d", bonds.size());
     }
 
     void generateMolecule() {
         auto atomCount = rand() % 6 + 2;
         for (int i = 0; i < atomCount; i++) {
-            vtx.push_back(vec2(
-                    (random()*fabs(genRange.x - genRange.y)) + genRange.x, random()*2-1
-                    ));
+            vtx.push_back(
+                    vec2((randomFloat() * fabs(genRange.x - genRange.y)) + genRange.x, randomFloat() * fabs(genRange.x - genRange.y)) + genRange.x
+                    );
         }
         addAtoms();
         addBonds();
@@ -339,9 +339,74 @@ public:
             b.setVertices(centerOfMass);
         }
     }
+
+    void simulate(float sec) {
+        vec2 r;
+        vec2 v;
+        float omega;
+        float alpha;
+        vec2 F;
+        float M;
+        std::vector<Atom> otherAtoms;
+
+        for (auto &a : atoms) {
+            for(auto &a : otherAtoms) {
+                // F = // coulomb and medium
+                // M = // 
+            }
+            // v += F / a.getMass() * sec;
+            // r += v * sec;
+            // omega += M / theta * sec;
+            // alpha += omega * sec;
+        }
+        
+    }
 };
 
-std::vector<Molecule> molecules;
+class Scene {
+
+    std::vector<Molecule> molecules;
+    bool notFirst = false;
+public:
+
+    void init() {
+        molecules.push_back(Molecule(vec2(-0.5f, 0.5f)));
+        molecules.push_back(Molecule(vec2(-0.5f, 0.5f)));
+
+        for (auto & m : molecules) {
+            m.generateMolecule();
+        }
+    }
+
+    void draw() {
+        if(notFirst) {
+            for (int i = 0; i < molecules.size(); i++) {
+                molecules[i].drawMolecule(vec3(1, 1, 1));
+            }
+        }
+    }
+
+    void pressSpace() {
+        notFirst = true;
+
+        for (auto &m : molecules) {
+            m = (Molecule(vec2(-0.5f, 0.5f)));
+            m.generateMolecule();
+        }
+    }
+
+    void simulate(float sec) {
+        for (auto &m : molecules) {
+            m.rotateMolecule(sec);
+        }
+        molecules[0].translateMolecule(vec2(0.5f, 0.5f));
+        molecules[1].translateMolecule(vec2(-0.5f, -0.5f));
+    //    molecules[0].simulate(sec);
+    //    molecules[1].simulate(sec);
+    }
+};
+
+Scene s;
 
 void onInitialization() {
     glViewport(0, 0, windowWidth, windowHeight);
@@ -350,40 +415,24 @@ void onInitialization() {
 
     srand(time(nullptr));
 
+    s.init();
+
     gpuProgram.create(vertexSource, fragmentSource, "outColor");
-
-    molecules.push_back(Molecule(vec2(-1.0f, 0.0f)));
-    molecules.push_back(Molecule(vec2(0.0f, 1.0f)));
-
-    for (auto & m : molecules) {
-        m.generateMolecule();
-    }
 }
-
-bool notFirst = false;
 
 void onDisplay() {
     glClearColor(0.3f, 0.3f, 0.3f, 0);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    if(notFirst) {
-        for (int i = 0; i < molecules.size(); i++) {
-            molecules[i].drawMolecule(vec3(1, 1, 1));
-        }
-    }
+    s.draw();
 
     glutSwapBuffers();
 }
 
 void onKeyboard(unsigned char key, int pX, int pY) {
     if (key == 32) {
-        notFirst = true;
 
-        for (auto &m : molecules) {
-            m = (Molecule(vec2(-1.0f, 0.0f)));
-            m.generateMolecule();
-        }
-
+        s.pressSpace();
         glutPostRedisplay();
     }
 }
@@ -403,10 +452,6 @@ void onMouse(int button, int state, int pX, int pY) {
 void onIdle() {
     long time = glutGet(GLUT_ELAPSED_TIME);
     float sec = time / 1000.0f;
-    for (auto &m : molecules) {
-        m.rotateMolecule(sec);
-    }
-    molecules[0].translateMolecule(vec2(0.5f, 0.5f));
-    molecules[1].translateMolecule(vec2(-0.5f, -0.5f));
+    s.simulate(sec);
     glutPostRedisplay();
 }
