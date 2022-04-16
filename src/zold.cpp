@@ -41,8 +41,27 @@ const char * const fragmentSource = R"(
 	}
 )";
 
+class Camera2D {
+    vec2 wCenter; // center in world coordinates
+    vec2 wSize;   // width and height in world coordinates
+public:
+    Camera2D() : wCenter(0, 0), wSize(2, 2) {}
+
+    mat4 V() { return TranslateMatrix(-wCenter); }
+
+    mat4 P() { return ScaleMatrix(vec2(2 / wSize.x, 2 / wSize.y)); }
+
+    void Zoom(float s) { wSize = wSize * s; }
+
+    void Pan(vec2 t) { wCenter = wCenter + t; }
+};
+
+Camera2D camera;        // 2D camera
+
 GPUProgram gpuProgram;
 const int nv = 100;
+const float epsVacuum10Emin12 = 8.85;
+const float epsWater10Emin12 = 711.54;
 
 float randomFloat() { return (float)rand() / RAND_MAX; }
 
@@ -95,8 +114,8 @@ public:
         if (count > 0) {
             updateGPU();
             gpuProgram.setUniform(color, "color");
-            gpuProgram.setUniform(M(), "MVP");
-            glBindVertexArray(vao);
+            mat4 MVP = M() * camera.V() * camera.P();
+            gpuProgram.setUniform(MVP, "MVP");
             glDrawArrays(type, 0, count);
         }
     }
@@ -109,13 +128,11 @@ public:
     }
 
     void rotate(float t) {
-        phi = t;
+        phi += t;
     }
 
     void translate(vec2 m) {
-        wTranslate.x = m.x;
-        wTranslate.y = m.y;
-        // TODO translate to +=
+        wTranslate = wTranslate + m;
     }
 };
 
@@ -123,7 +140,11 @@ class Atom : Object {
 public:
     float chargePowerMinus19C = 1.602f;
     float massPowerMinus24Kg = 1.674f;
+
     vec2 position;
+    vec2 speed = 0;
+    vec2 force = 0;
+
     float radius;
     vec3 color;
 
@@ -132,10 +153,11 @@ public:
         chargePowerMinus19C *= chargeMultiplier;
         massPowerMinus24Kg *= ((rand() % 100) + 100);
         radius = massPowerMinus24Kg / 5000;
+
         if(chargePowerMinus19C < 0)
-            color = vec3(0, 0, chargePowerMinus19C*(-1) / 1000);
+            color = vec3(0, 0, chargePowerMinus19C*(-1) / 500);
         else
-            color = vec3(chargePowerMinus19C / 1000, 0, 0);
+            color = vec3(chargePowerMinus19C / 500, 0, 0);
 
 
         for (int i = 0; i < nv; i++) {
@@ -145,6 +167,7 @@ public:
     }
     void drawAtom() {
         Draw(GL_TRIANGLE_FAN, this->color);
+        Draw(GL_POINT, this->color);
     }
 
     float getMass() const {
@@ -156,9 +179,9 @@ public:
     }
 
     void setVertices(vec2 vec) {
+        position = position + vec;
         for (auto &v : vtx) {
-            v.x -= vec.x;
-            v.y -= vec.y;
+            v = v + vec;
         }
     }
 
@@ -172,6 +195,23 @@ public:
 
     void translateAtom(vec2 v) {
         translate(v);
+        position = position + v;
+    }
+
+    void setPosition(vec2 pos) {
+        position = pos;
+    }
+
+    vec2 getPosition() {
+        return position;
+    }
+
+    float getCharge() {
+        return chargePowerMinus19C;
+    }
+
+    float getRadius() {
+        return radius;
     }
 };
 
@@ -181,14 +221,15 @@ public:
     vec2 pointTo;
     vec2 normalized;
     float distanceUnit;
-    float length;
+    float distance;
 
     Bond(vec2 pFrom, vec2 pTo) {
         pointFrom = pFrom;
         pointTo = pTo;
-        length = sqrt((pointFrom.x-pointTo.x)*(pointFrom.x-pointTo.x)+(pointFrom.y-pointTo.y)*(pointFrom.y-pointTo.y));
-        distanceUnit = length / nv;
-        normalized = (pointTo - pointFrom) / length;
+        //length = sqrt((pointFrom.x-pointTo.x)*(pointFrom.x-pointTo.x)+(pointFrom.y-pointTo.y)*(pointFrom.y-pointTo.y));
+        distance = length(pointTo - pointFrom);
+        distanceUnit = distance / nv;
+        normalized = (pointTo - pointFrom) / distance;
         for (int i = 0; i < nv; i++) {
             vtx.push_back(pointFrom + (normalized * distanceUnit * i));
         }
@@ -200,13 +241,12 @@ public:
 
     void setVertices(vec2 vec) {
         for (auto &v : vtx) {
-            v.x -= vec.x;
-            v.y -= vec.y;
+            v = v + vec;
         }
     }
 
     void rotateBond(float d) {
-        phi = d;
+        rotate(d);
     }
 
     void translateBond(vec2 v) {
@@ -222,6 +262,7 @@ public:
     vec2 genRange;
 
     vec2 centerOfMass;
+    float molMass;
 
     Molecule(vec2 range) {
         genRange = range;
@@ -239,13 +280,18 @@ public:
     void addAtoms() {
         std::vector<int> charges;
         int sum = 0;
+        // TODO test
         for (int i = 0; i < vtx.size() - 1; i++) {
-            charges.push_back((rand() % 2000) - 1000);
+            charges.push_back((rand() % 1000) - 500);
             sum+=charges[i];
         }
+        // TODO test
         charges.push_back(sum * (-1));
         for (int i = 0; i < vtx.size(); i++) {
             atoms.push_back(Atom(vtx[i],charges[i]));
+        }
+        for (auto &a : atoms) {
+            molMass += a.getMass();
         }
     }
 
@@ -281,6 +327,8 @@ public:
 
     void generateMolecule() {
         auto atomCount = rand() % 6 + 2;
+        // TODO test
+        //atomCount = 1;
         for (int i = 0; i < atomCount; i++) {
             vtx.push_back(
                     vec2((randomFloat() * fabs(genRange.x - genRange.y)) + genRange.x, randomFloat() * fabs(genRange.x - genRange.y)) + genRange.x
@@ -311,6 +359,7 @@ public:
         for (auto &b : bonds) {
             b.translateBond(v);
         }
+        centerOfMass = centerOfMass + v;
     }
 
     void calculateCenterOfMass() {
@@ -328,38 +377,81 @@ public:
 
     void normalizeMolecule() {
         for (auto &v : vtx) {
-            v.x -= centerOfMass.x;
-            v.y -= centerOfMass.y;
+            v = v - centerOfMass;
         }
         for (auto &a : atoms) {
-            a.setVertices(centerOfMass);
+            a.setVertices(-centerOfMass);
         }
 
         for (auto &b : bonds) {
-            b.setVertices(centerOfMass);
+            b.setVertices(-centerOfMass);
         }
+
+        centerOfMass = centerOfMass - centerOfMass;
     }
 
-    void simulate(float sec) {
-        vec2 r;
-        vec2 v;
-        float omega;
-        float alpha;
-        vec2 F;
-        float M;
-        std::vector<Atom> otherAtoms;
 
-        for (auto &a : atoms) {
-            for(auto &a : otherAtoms) {
-                // F = // coulomb and medium
-                // M = // 
+
+    void interact(Molecule &other, int count) {
+        float alpha = 0;
+        vec2 acceleration = vec2(0,0);
+        float omega = 0;
+        vec2 speed = vec2(0,0);
+        float dt = 0.01;
+
+        for (int i = 0; i < count; i++) {
+        vec3 torque = vec3(0,0,0);
+        vec3 torqueSum = vec3(0,0,0);
+        float theta = 0;
+
+        vec2 FRotate = vec2(0, 0);
+        vec2 FTranslate = vec2(0, 0);
+            for (auto &a: atoms) {
+                vec2 coulomb;
+                vec2 coulombSum = vec2(0, 0);
+
+                vec2 r = a.getPosition() - centerOfMass;
+                float rLen = length(r);
+                float aCharge = a.getCharge();
+                vec2 aPos = a.getPosition();
+                for (auto &o: other.atoms) {
+                    float oCharge = o.getCharge();
+                    vec2 oPos = o.getPosition();
+                    vec2 aoVec = aPos - oPos;
+                    coulomb = (10*(aCharge * oCharge * normalize(aoVec))) /
+                            (2 * M_PI * epsVacuum10Emin12 * length(aoVec));
+                    if(length(coulombSum) < 10000000) {
+                        coulombSum = coulombSum + coulomb;
+                    }
+            //printf("col: %.2f\n", length(coulomb));
+                }
+                // TODO test
+                FTranslate = FTranslate + coulombSum * normalize(r);
+                FRotate = FRotate + (coulombSum - FTranslate);
+                theta += a.getMass() * rLen * rLen;
+                torque = cross(r, FRotate);
+                torqueSum = torqueSum + torque;
             }
-            // v += F / a.getMass() * sec;
-            // r += v * sec;
-            // omega += M / theta * sec;
-            // alpha += omega * sec;
+            //printf("Ft: %.2f\n", length(FTranslate));
+            //printf("cs: %8.2f\n", length(FTranslate));
+            acceleration = FTranslate / (molMass); // ok
+            //printf("acc: %f\n", acceleration.x);
+            speed = acceleration * dt; // ok
+            speed = speed * 0.2;
+
+            alpha = length((torqueSum) / theta);
+
+            omega = alpha * dt; // ok
+            omega = omega * 0.2;
+            if (torqueSum.z < 0) omega *= -1;
+
+            float angle = omega * dt;
+            vec2 translateV = speed * dt; // ok
+            // TODO test
+            rotateMolecule(angle);
+            translateMolecule(translateV);
+            //printf("speed x: %f3\n", translateV.x);
         }
-        
     }
 };
 
@@ -376,10 +468,14 @@ public:
         for (auto & m : molecules) {
             m.generateMolecule();
         }
+        vec2 translate0 = vec2(-0.5, 0);
+        vec2 translate1 = vec2(0.5, 0);
+        molecules[0].translateMolecule(translate0);
+        molecules[1].translateMolecule(translate1);
     }
 
     void draw() {
-        if(notFirst) {
+        if(true) {
             for (int i = 0; i < molecules.size(); i++) {
                 molecules[i].drawMolecule(vec3(1, 1, 1));
             }
@@ -393,25 +489,25 @@ public:
             m = (Molecule(vec2(-0.5f, 0.5f)));
             m.generateMolecule();
         }
+        vec2 translate0 = vec2(-0.5f, 0.1f);
+        vec2 translate1 = vec2(0.5f, -0.09f);
+        molecules[0].translateMolecule(translate0);
+        molecules[1].translateMolecule(translate1);
     }
 
-    void simulate(float sec) {
-        for (auto &m : molecules) {
-            m.rotateMolecule(sec);
-        }
-        molecules[0].translateMolecule(vec2(0.5f, 0.5f));
-        molecules[1].translateMolecule(vec2(-0.5f, -0.5f));
-    //    molecules[0].simulate(sec);
-    //    molecules[1].simulate(sec);
+    void simulate(int count) {
+        molecules[0].interact(molecules[1], count);
+        molecules[1].interact(molecules[0], count);
     }
 };
+
 
 Scene s;
 
 void onInitialization() {
     glViewport(0, 0, windowWidth, windowHeight);
     glLineWidth(2);
-    glPointSize(10);
+    glPointSize(50);
 
     srand(time(nullptr));
 
@@ -430,28 +526,57 @@ void onDisplay() {
 }
 
 void onKeyboard(unsigned char key, int pX, int pY) {
-    if (key == 32) {
 
-        s.pressSpace();
-        glutPostRedisplay();
+    switch (key) {
+        case 32 :
+            s.pressSpace();
+            break;
+        case 's':
+            camera.Pan(vec2(-0.1, 0));
+            break;
+        case 'd':
+            camera.Pan(vec2(+0.1, 0));
+            break;
+        case 'e':
+            camera.Pan(vec2(0, 0.1));
+            break;
+        case 'x':
+            camera.Pan(vec2(0, -0.1));
+            break;
+        case 'z':
+            camera.Zoom(0.99f);
+            break;
+        case 'Z':
+            camera.Zoom(1.01f);
+            break;
     }
+    glutPostRedisplay();
 }
 
 
 void onKeyboardUp(unsigned char key, int pX, int pY) {
 }
 
-
 void onMouseMotion(int pX, int pY) {
 }
 
-// Mouse click event
 void onMouse(int button, int state, int pX, int pY) {
 }
 
+long prevTime = 0;
+int elapsed = 0;
+int cycles = 0;
+int deltat = 10; // ms
+
 void onIdle() {
     long time = glutGet(GLUT_ELAPSED_TIME);
-    float sec = time / 1000.0f;
-    s.simulate(sec);
+    cycles = 0;
+    elapsed += (time - prevTime);
+    while (elapsed > deltat) {
+        elapsed -= deltat;
+        cycles++;
+    }
+    s.simulate(cycles);
+    prevTime = time;
     glutPostRedisplay();
 }
