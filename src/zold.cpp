@@ -151,9 +151,9 @@ public:
     Atom(vec2 pos, int chargeMultiplier) {
         position = pos;
         chargePowerMinus19C *= chargeMultiplier;
-        massPowerMinus24Kg *= ((rand() % 100) + 100);
-        radius = massPowerMinus24Kg / 5000;
-
+        massPowerMinus24Kg *= ((rand() % 100) + 1);
+        radius = massPowerMinus24Kg / 5000 + 0.05f;
+        // TODO itt kene valami
         if(chargePowerMinus19C < 0)
             color = vec3(0, 0, chargePowerMinus19C*(-1) / 500);
         else
@@ -428,10 +428,13 @@ public:
                 // TODO test
                 FTranslate = FTranslate + coulombSum * normalize(r);
                 FRotate = FRotate + (coulombSum - FTranslate);
-                theta += a.getMass() * rLen * rLen;
+                theta += a.getMass() * rLen * rLen * 4;
                 torque = cross(r, FRotate);
                 torqueSum = torqueSum + torque;
             }
+
+            // TODO szim javit, hiperbola, kamera miert rossz/????
+
             //printf("Ft: %.2f\n", length(FTranslate));
             //printf("cs: %8.2f\n", length(FTranslate));
             acceleration = FTranslate / (molMass); // ok
@@ -501,7 +504,6 @@ public:
     }
 };
 
-
 Scene s;
 
 void onInitialization() {
@@ -531,18 +533,18 @@ void onKeyboard(unsigned char key, int pX, int pY) {
         case 32 :
             s.pressSpace();
             break;
-        case 's':
-            camera.Pan(vec2(-0.1, 0));
-            break;
-        case 'd':
-            camera.Pan(vec2(+0.1, 0));
-            break;
-        case 'e':
-            camera.Pan(vec2(0, 0.1));
-            break;
-        case 'x':
-            camera.Pan(vec2(0, -0.1));
-            break;
+//        case 's':
+//            camera.Pan(vec2(-0.01, 0));
+//            break;
+//        case 'd':
+//            camera.Pan(vec2(+0.01, 0));
+//            break;
+//        case 'e':
+//            camera.Pan(vec2(0, 0.01));
+//            break;
+//        case 'x':
+//            camera.Pan(vec2(0, -0.01));
+//            break;
         case 'z':
             camera.Zoom(0.99f);
             break;
