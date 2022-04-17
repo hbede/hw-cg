@@ -20,10 +20,31 @@ const char *const vertexSource = R"(
 	precision highp float;
 
 	uniform mat4 MVP;
+
 	layout(location = 0) in vec2 vp;
 
 	void main() {
-		gl_Position = vec4(vp.x, vp.y, 0, 1)*MVP;
+        // euclidean plane to hyperbolic plane
+        vec3 hypPos = vec3(
+            vp.x,
+            vp.y,
+            sqrt(vp.x * vp.x + vp.y * vp.y + 1)
+        );
+        // hyperbolic plane to circle
+        vec3 pp = vec3(
+            hypPos.x/(hypPos.z + 1),
+            hypPos.y/(hypPos.z + 1),
+            0
+        );
+        // for transformation
+        mat4 helpMatrix = mat4(
+            1,0,0,0,
+            0,1,0,0,
+            0,0,1,0,
+            pp.x,pp.y,pp.z,1
+        );
+        // final vertex output
+		gl_Position = vec4(vp, 0, 1) * MVP * helpMatrix;
 	}
 )";
 
@@ -45,7 +66,9 @@ class Camera2D {
 public:
     Camera2D() : wCenter(0, 0), wSize(2, 2) {}
 
-    mat4 V() { return TranslateMatrix(-wCenter); }
+    mat4 V() {
+        return TranslateMatrix(-wCenter);
+    }
 
     mat4 P() { return ScaleMatrix(vec2(2 / wSize.x, 2 / wSize.y)); }
 
@@ -57,6 +80,8 @@ public:
 Camera2D camera;
 
 GPUProgram gpuProgram;
+
+// number of vertices in a circle and in a line strip
 const int nv = 100;
 
 
@@ -275,13 +300,11 @@ public:
         std::vector<int> charges;
         int sum = 0;
         // calculating random charge multipliers
-        // TODO
         for (int i = 0; i < vtx.size() - 1; i++) {
             charges.push_back((rand() % 1000) - 500);
             sum += charges[i];
         }
-        // TODO
-         charges.push_back(sum * (-1));
+        charges.push_back(sum * (-1));
         for (int i = 0; i < vtx.size(); i++) {
             atoms.push_back(Atom(vtx[i], charges[i]));
         }
@@ -325,8 +348,6 @@ public:
     // generates molecule
     void generateMolecule() {
         auto atomCount = rand() % 6 + 2;
-        // TODO
-        //atomCount = 1;
         for (int i = 0; i < atomCount; i++) {
             vtx.push_back(
                     vec2((randomFloat() * fabs(genRange.x - genRange.y)) + genRange.x,
@@ -392,74 +413,69 @@ public:
 
     const float dt = 0.01;
 
-        float omega = 0;
-        vec2 speed = vec2(0, 0);
-    // simulation for a molecule
-    void interact(Molecule &other, int count) {
+    float omega = 0;
+    vec2 speed = vec2(0, 0);
 
-        for (int i = 0; i < 1; i++) {
+    // simulation for a single molecule
+    void interact(Molecule &other) {
 
-            float alpha = 0;
-            vec2 acceleration = vec2(0, 0);
-            vec3 torque = vec3(0, 0, 0);
-            float torqueSum = 0;
-            float theta = 0;
+        float alpha = 0;
+        vec2 acceleration = vec2(0, 0);
+        vec3 torque = vec3(0, 0, 0);
+        float torqueSum = 0;
+        float theta = 0;
 
-            vec2 FRotate = vec2(0, 0); // force of rotation
-            vec2 FTranslate = vec2(0, 0); // force of movement
+        vec2 FRotate = vec2(0, 0); // force of rotation
+        vec2 FTranslate = vec2(0, 0); // force of movement
 
-            // every atom
-            for (auto &a: atoms) {
+        // every atom
+        for (auto &a: atoms) {
 
-                vec2 coulomb;
-                vec2 coulombSum = vec2(0, 0);
+            vec2 coulomb;
+            vec2 coulombSum = vec2(0, 0);
 
-                vec2 r = a.getPosition() - centerOfMass;
-                float rLen = length(r);
-                float aCharge = a.getCharge();
-                vec2 aPos = a.getPosition();
-                float aMass = a.getMass();
+            vec2 r = a.getPosition() - centerOfMass;
+            float rLen = length(r);
+            float aCharge = a.getCharge();
+            vec2 aPos = a.getPosition();
+            float aMass = a.getMass();
 
-                // every atom of other molecule
-                for (auto &o: other.atoms) {
+            // every atom of other molecule
+            for (auto &o: other.atoms) {
 
-                    float oCharge = o.getCharge();
-                    vec2 oPos = o.getPosition();
-                    vec2 aoVec = aPos - oPos;
-                    vec2 upC = 10E-3 * (aCharge * oCharge * normalize(aoVec));
-                    float bottomC = 2.0f * M_PI * length(aoVec) * length(aoVec);
+                float oCharge = o.getCharge();
+                vec2 oPos = o.getPosition();
+                vec2 aoVec = aPos - oPos;
+                vec2 upC = 10E-1 * (aCharge * oCharge * normalize(aoVec));
+                float bottomC = 2.0f * M_PI * length(aoVec) * length(aoVec);
 
-                    if (length(aoVec) > 0.1) {
-                        coulomb = upC / bottomC;
-                    }
-                    else {
-                        coulomb = 0;
-                    }
-                        coulombSum = coulombSum + coulomb;
+                if (length(aoVec) > 0.1) {
+                    coulomb = upC / bottomC;
+                } else {
+                    coulomb = 0;
                 }
-                // TODO
-                FTranslate = FTranslate + coulombSum * normalize(r);
-                FRotate = FRotate + (coulombSum - FTranslate);
-                theta += aMass * rLen * rLen * 3;
-                torque = cross(r, FRotate);
-                torqueSum = torqueSum + torque.z;
+                coulombSum = coulombSum + coulomb;
             }
-            acceleration = FTranslate / (molMass);
-            //printf("a x: %.4f, y: %.4f\nf x:%.4f, y: %.4f\nm: %.4f\n====================\n", acceleration.x, acceleration.y, FTranslate.x, FTranslate.y, molMass);
-            //printf("%.4f\n", molMass);
-            acceleration = acceleration * 0.4f; // medium resistance
-            speed = speed + acceleration * dt;
-
-            alpha = torqueSum / theta;
-            alpha = alpha * 0.4f; // medium resistance
-
-            omega = omega + alpha * dt;
-
-            // incrementing rotation and translation in matrix
-            // TODO
-            rotateMolecule(omega * dt);
-            translateMolecule(speed * dt);
+            FTranslate = FTranslate + coulombSum * normalize(r);
+            FRotate = FRotate + (coulombSum - FTranslate);
+            theta += (aMass) * rLen * rLen * 2;
+            torque = cross(r, FRotate);
+            torqueSum = torqueSum + torque.z;
         }
+        acceleration = FTranslate / (molMass);
+
+        speed = speed + acceleration * dt;
+        speed = speed * 0.4; // media resistance
+
+        alpha = torqueSum / theta;
+
+
+        omega = omega + alpha * dt;
+        omega = omega * 0.4; // media resistance
+
+        // incrementing rotation and translation in matrix
+        rotateMolecule(omega * dt);
+        translateMolecule(speed * dt);
     }
 };
 
@@ -470,8 +486,8 @@ class Scene {
 public:
 
     void init() {
-        molecules.push_back(Molecule(vec2(-0.4f, 0.4f)));
-        molecules.push_back(Molecule(vec2(-0.4f, 0.4f)));
+        molecules.push_back(Molecule(vec2(-0.5f, 0.5f)));
+        molecules.push_back(Molecule(vec2(-0.5f, 0.5f)));
 
         for (auto &m: molecules) {
             m.generateMolecule();
@@ -497,9 +513,9 @@ public:
     }
 
     void simulate(int count) {
-        for (int i = 0; i < count; ++i) {
-            molecules[0].interact(molecules[1], count);
-            molecules[1].interact(molecules[0], count);
+        for (int i = 0; i < count; i++) {
+            molecules[0].interact(molecules[1]);
+            molecules[1].interact(molecules[0]);
 
         }
     }
