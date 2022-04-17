@@ -63,11 +63,6 @@ const int nv = 100;
 // utility functions
 float randomFloat() { return (float) rand() / RAND_MAX; }
 
-// ezt a fuggvenyt egy ismeros segitett megirni, mivel nem lehetett "beincludeolni" azt, amire szuksegem lett volna
-// ez a fuggveny visszaadja egy adott elem indexet, ami a moho algoritmusnal std::vector-bol tavolit el elemet
-// a fuggvenyt reszben masoltam, de sajat igenyeimre alakitottam (vec2 eltavolitasa)
-// a feladat tobbi reszehez nem vettem igenybe kulso segitseget
-
 int getIndex(std::vector<vec2> &v, vec2 &item) {
     for (int i = 0; i < v.size(); ++i) {
         if (item.x == v[i].x && item.y == v[i].y) {
@@ -144,17 +139,17 @@ public:
 
 class Atom : Object {
 public:
-    float chargePowerMinus19C = 1.602f;
-    float massPowerMinus24Kg = 1.674f;
+    float chargePowerMinus19C;
+    float massPowerMinus24Kg;
 
     vec2 position;
-    vec2 speed = 0;
-    vec2 force = 0;
 
     float radius;
     vec3 color;
 
     Atom(vec2 pos, int chargeMultiplier) {
+        chargePowerMinus19C = 1.602f;
+        massPowerMinus24Kg = 1.674f;
         position = pos;
         chargePowerMinus19C *= chargeMultiplier; // random charge
         massPowerMinus24Kg *= ((rand() % 100) + 100); // random mass
@@ -264,6 +259,7 @@ public:
 
     Molecule(vec2 range) {
         genRange = range;
+        molMass = 0;
     }
 
     void drawMolecule() {
@@ -279,11 +275,13 @@ public:
         std::vector<int> charges;
         int sum = 0;
         // calculating random charge multipliers
+        // TODO
         for (int i = 0; i < vtx.size() - 1; i++) {
             charges.push_back((rand() % 1000) - 500);
             sum += charges[i];
         }
-        charges.push_back(sum * (-1));
+        // TODO
+         charges.push_back(sum * (-1));
         for (int i = 0; i < vtx.size(); i++) {
             atoms.push_back(Atom(vtx[i], charges[i]));
         }
@@ -300,7 +298,7 @@ public:
         vec2 start = vec2(freeAtoms[0]);
 
         tree.push_back(start);
-        // ehhez kellett a getIndex fuggveny, amit nem reszben nem magamtol talaltam ki
+        // getIndex to find element to remove
         freeAtoms.erase(freeAtoms.begin() + getIndex(freeAtoms, start));
 
         while (tree.size() < vtx.size()) {
@@ -327,6 +325,8 @@ public:
     // generates molecule
     void generateMolecule() {
         auto atomCount = rand() % 6 + 2;
+        // TODO
+        //atomCount = 1;
         for (int i = 0; i < atomCount; i++) {
             vtx.push_back(
                     vec2((randomFloat() * fabs(genRange.x - genRange.y)) + genRange.x,
@@ -392,12 +392,12 @@ public:
 
     const float dt = 0.01;
 
-    // simulation for a molecule
-    void interact(Molecule &other, int count) {
         float omega = 0;
         vec2 speed = vec2(0, 0);
+    // simulation for a molecule
+    void interact(Molecule &other, int count) {
 
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < 1; i++) {
 
             float alpha = 0;
             vec2 acceleration = vec2(0, 0);
@@ -418,6 +418,7 @@ public:
                 float rLen = length(r);
                 float aCharge = a.getCharge();
                 vec2 aPos = a.getPosition();
+                float aMass = a.getMass();
 
                 // every atom of other molecule
                 for (auto &o: other.atoms) {
@@ -425,34 +426,37 @@ public:
                     float oCharge = o.getCharge();
                     vec2 oPos = o.getPosition();
                     vec2 aoVec = aPos - oPos;
-                    vec2 upC = 4 * (aCharge * oCharge * normalize(aoVec));
-                    float bottomC = 2 * M_PI * length(aoVec);
+                    vec2 upC = 10E-3 * (aCharge * oCharge * normalize(aoVec));
+                    float bottomC = 2.0f * M_PI * length(aoVec) * length(aoVec);
 
-                    if (length(aoVec) > 0.000000001) {
+                    if (length(aoVec) > 0.1) {
                         coulomb = upC / bottomC;
-                        coulombSum = coulombSum + coulomb;
                     }
                     else {
                         coulomb = 0;
-                        coulombSum = coulombSum + coulomb;
                     }
+                        coulombSum = coulombSum + coulomb;
                 }
+                // TODO
                 FTranslate = FTranslate + coulombSum * normalize(r);
                 FRotate = FRotate + (coulombSum - FTranslate);
-                theta += a.getMass() * rLen * rLen * 3;
+                theta += aMass * rLen * rLen * 3;
                 torque = cross(r, FRotate);
                 torqueSum = torqueSum + torque.z;
             }
             acceleration = FTranslate / (molMass);
-            acceleration = acceleration * 0.4; // medium resistance
-            speed = acceleration * dt;
+            //printf("a x: %.4f, y: %.4f\nf x:%.4f, y: %.4f\nm: %.4f\n====================\n", acceleration.x, acceleration.y, FTranslate.x, FTranslate.y, molMass);
+            //printf("%.4f\n", molMass);
+            acceleration = acceleration * 0.4f; // medium resistance
+            speed = speed + acceleration * dt;
 
             alpha = torqueSum / theta;
-            alpha = alpha * 0.4; // medium resistance
+            alpha = alpha * 0.4f; // medium resistance
 
-            omega = alpha * dt;
+            omega = omega + alpha * dt;
 
             // incrementing rotation and translation in matrix
+            // TODO
             rotateMolecule(omega * dt);
             translateMolecule(speed * dt);
         }
@@ -493,8 +497,11 @@ public:
     }
 
     void simulate(int count) {
-        molecules[0].interact(molecules[1], count);
-        molecules[1].interact(molecules[0], count);
+        for (int i = 0; i < count; ++i) {
+            molecules[0].interact(molecules[1], count);
+            molecules[1].interact(molecules[0], count);
+
+        }
     }
 };
 
@@ -560,15 +567,15 @@ void onMouse(int button, int state, int pX, int pY) {
 long prevTime = 0;
 int elapsed = 0;
 int cycles = 0;
-int deltat = 10; // simulation every 10ms
+int deltaT = 10; // simulation every 10ms
 
 void onIdle() {
     long time = glutGet(GLUT_ELAPSED_TIME);
     cycles = 0;
     elapsed += (time - prevTime);
     // how many times 10ms since last onIdle call...
-    while (elapsed > deltat) {
-        elapsed -= deltat;
+    while (elapsed > deltaT) {
+        elapsed -= deltaT;
         cycles++;
     }
     s.simulate(cycles);
