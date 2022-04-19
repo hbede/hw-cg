@@ -5,7 +5,7 @@ project(MOLECULE
         LANGUAGES CXX
         DESCRIPTION "MOLECULE SIMULATION IN A HYPERBOLIC PLANE")
 
-set(SRC_FILES ./src/framework.cpp src/Skeleton.cpp.tmp) # EXTEND
+set(SRC_FILES ./src/framework.cpp) # EXTEND
 set(HEADER_FILES ./src/framework.h) # EXTEND
 
 option(I_LIKE_PAIN "Enable pedantic build" OFF)
