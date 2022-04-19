@@ -33,7 +33,7 @@ endif()
 set_source_files_properties(${SRC_FOLDER}/Skeleton.cpp ${SRC_FOLDER}/framework.cpp
         ${SRC_FOLDER}/framework.h PROPERTIES GENERATED TRUE)
 
-add_executable(program src/zold.cpp)
+add_executable(program src/Skeleton.cpp)
 target_sources(program PRIVATE ${SRC_FILES} ${HEADER_FILES})
 target_include_directories(program PRIVATE ${INCLUDE_FOLDER})
 set_property(TARGET program PROPERTY CXX_STANDARD 14)
